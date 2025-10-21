@@ -1,0 +1,10 @@
+# Dépendances pour l'application Streamlit originale
+streamlit==1.37.1
+
+# Dépendances supplémentaires pour la version desktop
+pywebview==4.4.1
+requests==2.31.0
+pyinstaller==6.3.0
+
+# Optionnel: pour une meilleure expérience
+psutil==5.9.6

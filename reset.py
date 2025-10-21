@@ -1,0 +1,11 @@
+import sqlite3, os
+db_path = os.path.join(os.path.dirname(__file__), "pharmacy.db")
+con = sqlite3.connect(db_path)
+cur = con.cursor()
+cur.execute("DELETE FROM history;")
+cur.execute("DELETE FROM products;")
+cur.execute("DELETE FROM sqlite_sequence WHERE name IN ('products','history');")
+con.commit()
+con.execute("VACUUM;")
+con.close()
+print("Base vidée.")
