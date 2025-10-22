@@ -20,20 +20,69 @@ def get_connection() -> sqlite3.Connection:
 def init_db() -> None:
     """Create the products table and history table with triggers if they don't exist."""
     with closing(get_connection()) as conn, conn:  # type: ignore[attr-defined]
-        # Create products table
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS products (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                quantity INTEGER NOT NULL CHECK(quantity >= 0),
-                expiry_date TEXT NOT NULL,
-                created_at TEXT DEFAULT (datetime('now'))
+        # Check if products table exists already
+        cur = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'").fetchone()
+        if cur:
+            # Check indexes to see if there's a unique index on 'name' only and not on (name, expiry_date)
+            idxs = conn.execute("PRAGMA index_list('products')").fetchall()
+            has_unique_name = False
+            has_unique_pair = False
+            for idx in idxs:
+                if not idx['unique']:
+                    continue
+                info = conn.execute(f"PRAGMA index_info('{idx['name']}')").fetchall()
+                cols = [i['name'] for i in info]
+                if cols == ['name']:
+                    has_unique_name = True
+                if cols == ['name', 'expiry_date'] or cols == ['expiry_date', 'name']:
+                    has_unique_pair = True
+
+            if has_unique_name and not has_unique_pair:
+                # Perform migration: create new table, copy aggregated data grouped by (name, expiry_date)
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS products_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name TEXT NOT NULL,
+                        quantity INTEGER NOT NULL CHECK(quantity >= 0),
+                        expiry_date TEXT NOT NULL,
+                        created_at TEXT DEFAULT (datetime('now')),
+                        UNIQUE(name, expiry_date)
+                    )
+                    """
+                )
+
+                # Aggregate existing rows by (name, expiry_date) to avoid duplicates
+                rows = conn.execute(
+                    "SELECT name, expiry_date, SUM(quantity) as quantity, MIN(created_at) as created_at "
+                    "FROM products GROUP BY name, expiry_date"
+                ).fetchall()
+
+                for r in rows:
+                    conn.execute(
+                        "INSERT INTO products_new (name, quantity, expiry_date, created_at) VALUES (?, ?, ?, ?)",
+                        (r['name'], r['quantity'], r['expiry_date'], r['created_at']),
+                    )
+
+                # Drop old table and rename new
+                conn.execute("DROP TABLE products")
+                conn.execute("ALTER TABLE products_new RENAME TO products")
+        else:
+            # Table does not exist: create with desired schema
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS products (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    quantity INTEGER NOT NULL CHECK(quantity >= 0),
+                    expiry_date TEXT NOT NULL,
+                    created_at TEXT DEFAULT (datetime('now')),
+                    UNIQUE(name, expiry_date)
+                )
+                """
             )
-            """
-        )
-        
-        # Create history table for audit trail
+
+        # Create or ensure history table exists
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS history (
@@ -50,17 +99,17 @@ def init_db() -> None:
             )
             """
         )
-        
+
         # Helpful index for ordering by expiry date
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_products_expiry ON products(expiry_date)"
         )
-        
+
         # Index for history table
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_history_timestamp ON history(timestamp DESC)"
         )
-        
+
         # Trigger for INSERT operations
         conn.execute(
             """
@@ -72,12 +121,12 @@ def init_db() -> None:
                     operation, product_id, product_name, new_quantity, new_expiry_date, details
                 ) VALUES (
                     'AJOUT', NEW.id, NEW.name, NEW.quantity, NEW.expiry_date,
-                    'Produit ajouté: ' || NEW.name || ' (Qté: ' || NEW.quantity || ', Exp: ' || NEW.expiry_date || ')'
+                    'Produit ajout\u00e9: ' || NEW.name || ' (Qt\u00e9: ' || NEW.quantity || ', Exp: ' || NEW.expiry_date || ')'
                 );
             END;
             """
         )
-        
+
         # Trigger for UPDATE operations
         conn.execute(
             """
@@ -91,15 +140,15 @@ def init_db() -> None:
                 ) VALUES (
                     'MODIFICATION', NEW.id, NEW.name, OLD.quantity, NEW.quantity,
                     OLD.expiry_date, NEW.expiry_date,
-                    'Produit modifié: ' || NEW.name || 
-                    CASE WHEN OLD.name != NEW.name THEN ' (Nom: ' || OLD.name || ' → ' || NEW.name || ')' ELSE '' END ||
-                    CASE WHEN OLD.quantity != NEW.quantity THEN ' (Qté: ' || OLD.quantity || ' → ' || NEW.quantity || ')' ELSE '' END ||
-                    CASE WHEN OLD.expiry_date != NEW.expiry_date THEN ' (Exp: ' || OLD.expiry_date || ' → ' || NEW.expiry_date || ')' ELSE '' END
+                    'Produit modifi\u00e9: ' || NEW.name || 
+                    CASE WHEN OLD.name != NEW.name THEN ' (Nom: ' || OLD.name || ' \u2192 ' || NEW.name || ')' ELSE '' END ||
+                    CASE WHEN OLD.quantity != NEW.quantity THEN ' (Qt\u00e9: ' || OLD.quantity || ' \u2192 ' || NEW.quantity || ')' ELSE '' END ||
+                    CASE WHEN OLD.expiry_date != NEW.expiry_date THEN ' (Exp: ' || OLD.expiry_date || ' \u2192 ' || NEW.expiry_date || ')' ELSE '' END
                 );
             END;
             """
         )
-        
+
         # Trigger for DELETE operations
         conn.execute(
             """
@@ -111,12 +160,11 @@ def init_db() -> None:
                     operation, product_id, product_name, old_quantity, old_expiry_date, details
                 ) VALUES (
                     'SUPPRESSION', OLD.id, OLD.name, OLD.quantity, OLD.expiry_date,
-                    'Produit supprimé: ' || OLD.name || ' (Qté: ' || OLD.quantity || ', Exp: ' || OLD.expiry_date || ')'
+                    'Produit supprim\u00e9: ' || OLD.name || ' (Qt\u00e9: ' || OLD.quantity || ', Exp: ' || OLD.expiry_date || ')'
                 );
             END;
             """
         )
-
 
 def add_product(name: str, quantity: int, expiry_date: str) -> int:
     """Insert a new product. Returns the created row id.
@@ -127,11 +175,51 @@ def add_product(name: str, quantity: int, expiry_date: str) -> int:
         expiry_date: ISO date string YYYY-MM-DD
     """
     with closing(get_connection()) as conn, conn:
-        cur = conn.execute(
-            "INSERT INTO products (name, quantity, expiry_date) VALUES (?, ?, ?)",
-            (name.strip(), quantity, expiry_date),
-        )
-        return int(cur.lastrowid)
+        # Normalize inputs
+        nm = name.strip()
+        exp = expiry_date
+
+        # If a product with same name and expiry_date exists, increment its quantity instead of inserting a new row
+        existing = conn.execute(
+            "SELECT id, quantity FROM products WHERE name = ? AND expiry_date = ?",
+            (nm, exp),
+        ).fetchone()
+
+        if existing:
+            existing_id = int(existing['id'])
+            existing_qty = int(existing['quantity'])
+            added_qty = int(quantity)
+            new_qty = existing_qty + added_qty
+            conn.execute(
+                "UPDATE products SET quantity = ? WHERE id = ?",
+                (new_qty, existing_id),
+            )
+
+            # The UPDATE will fire the trg_product_update trigger which inserts a MODIFICATION row.
+            # We prefer to record this operation as an AJOUT (fusion) in history. To avoid duplicate entries,
+            # delete the most-recent trigger-created MODIFICATION row for this product (if any),
+            # then insert our own AJOUT record describing the fusion.
+            last_hist = conn.execute(
+                "SELECT id, operation FROM history WHERE product_id = ? ORDER BY id DESC LIMIT 1",
+                (existing_id,),
+            ).fetchone()
+
+            if last_hist and last_hist['operation'] == 'MODIFICATION':
+                # remove the trigger-generated modification entry
+                conn.execute("DELETE FROM history WHERE id = ?", (int(last_hist['id']),))
+
+            details = f"Produit ajout (fusion): {nm} (Qté précédent: {existing_qty}, +{added_qty}) - Exp: {exp}"
+            conn.execute(
+                "INSERT INTO history (operation, product_id, product_name, old_quantity, new_quantity, old_expiry_date, new_expiry_date, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                ('AJOUT', existing_id, nm, existing_qty, new_qty, exp, exp, details),
+            )
+            return existing_id
+        else:
+            cur = conn.execute(
+                "INSERT INTO products (name, quantity, expiry_date) VALUES (?, ?, ?)",
+                (nm, int(quantity), exp),
+            )
+            return int(cur.lastrowid)
 
 
 def get_products(search: Optional[str] = None) -> List[sqlite3.Row]:
