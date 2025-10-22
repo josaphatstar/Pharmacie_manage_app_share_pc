@@ -119,6 +119,44 @@ def delete_product_dialog(prod_id: int, name: str):
             refresh()
 
 
+@st.dialog("Confirmer la sortie")
+def confirm_stockout_dialog(pending: dict):    
+    # Message d'information
+    st.info("Veuillez vérifier les informations suivantes :")
+    
+    # Informations en colonnes
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown(f"**Produit :** {pending['name']}")
+    with col2:
+        st.markdown(f"**Motif :** {pending['reason']}")
+    
+    st.markdown(f"**Quantité :** {pending['qty']}")
+    
+    st.divider()
+    
+    # Boutons d'action
+    b1, b2 = st.columns(2)
+    with b1:
+        if st.button("✓ Confirmer la sortie", type="primary", use_container_width=True, key="dlg_confirm_stockout"):
+            try:
+                db.remove_stock(
+                    product_id=pending['id'],
+                    quantity=pending['qty'],
+                    reason=pending['reason']
+                )
+            except Exception as e:
+                st.error(f"Erreur lors de l'enregistrement : {e}")
+            else:
+                st.session_state.show_stockout_success = "Sortie de stock enregistrée avec succès !"
+                del st.session_state["stockout_pending"]
+                refresh()
+    with b2:
+        if st.button("✕ Annuler", use_container_width=True, key="dlg_cancel_stockout"):
+            del st.session_state["stockout_pending"]
+            refresh()
+
+
 # --------------- Sidebar ---------------
 st.sidebar.title("🔎 Recherche")
 search = st.sidebar.text_input("Nom du produit")
@@ -358,26 +396,10 @@ with tab_stock_out:
             on_change=lambda: st.session_state.__setitem__("product_selection_changed", True),
         )
 
-        # If a stockout is pending confirmation, show confirmation panel
+        # If a stockout is pending confirmation, show confirmation modal
         if "stockout_pending" in st.session_state:
             pending = st.session_state["stockout_pending"]
-            st.warning(f"Confirmez la sortie suivante:\n\nProduit: {pending['name']}\nQuantité: {pending['qty']}\nMotif: {pending['reason']}\nStock avant: {pending['current_stock']}\nStock après: {pending['new_stock']}")
-            c1, c2 = st.columns(2)
-            with c1:
-                if st.button("Confirmer la sortie", key="confirm_stockout"):
-                    try:
-                        db.remove_stock(product_id=pending['id'], quantity=pending['qty'], reason=pending['reason'])
-                    except Exception as e:
-                        st.error(f"Erreur lors de l'enregistrement de la sortie : {e}")
-                    else:
-                        st.session_state.show_stockout_success = "Sortie de stock enregistrée avec succès"
-                    finally:
-                        st.session_state.pop("stockout_pending", None)
-                        st.rerun()
-            with c2:
-                if st.button("Annuler", key="cancel_stockout"):
-                    st.session_state.pop("stockout_pending", None)
-                    st.rerun()
+            confirm_stockout_dialog(pending)
 
         with st.form("stock_out_form"):
 
