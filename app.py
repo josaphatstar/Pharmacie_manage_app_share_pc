@@ -21,6 +21,12 @@ st.set_page_config(page_title="Pharmacie - Gestion de Stock", page_icon="💊", 
 
 def refresh():
     st.rerun()
+# Si la sélection du produit change via un callback, on pose un flag et on effectue
+# un seul rerun au début du script pour appliquer les changements (évite d'appeler
+# st.rerun() depuis l'intérieur d'un callback, ce qui est un no-op).
+if st.session_state.get("product_selection_changed"):
+    st.session_state.pop("product_selection_changed", None)
+    st.rerun()
 # --------------- Dialogs ---------------
 @st.dialog("Modifier le produit")
 def edit_product_dialog(prod_id: int, name: str, quantity: int, expiry: str):
@@ -343,13 +349,37 @@ with tab_stock_out:
             product_options.append(display_text)
             product_info[display_text] = {"id": pid, "name": name, "qty": qty, "exp": exp}
 
+        # Sélection du produit (en dehors du formulaire pour rendre le changement réactif)
+        selected_product = st.selectbox(
+            "Sélectionner le produit :",
+            options=product_options,
+            index=0 if product_options else None,
+            key="stockout_selected",
+            on_change=lambda: st.session_state.__setitem__("product_selection_changed", True),
+        )
+
+        # If a stockout is pending confirmation, show confirmation panel
+        if "stockout_pending" in st.session_state:
+            pending = st.session_state["stockout_pending"]
+            st.warning(f"Confirmez la sortie suivante:\n\nProduit: {pending['name']}\nQuantité: {pending['qty']}\nMotif: {pending['reason']}\nStock avant: {pending['current_stock']}\nStock après: {pending['new_stock']}")
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("Confirmer la sortie", key="confirm_stockout"):
+                    try:
+                        db.remove_stock(product_id=pending['id'], quantity=pending['qty'], reason=pending['reason'])
+                    except Exception as e:
+                        st.error(f"Erreur lors de l'enregistrement de la sortie : {e}")
+                    else:
+                        st.session_state.show_stockout_success = "Sortie de stock enregistrée avec succès"
+                    finally:
+                        st.session_state.pop("stockout_pending", None)
+                        st.rerun()
+            with c2:
+                if st.button("Annuler", key="cancel_stockout"):
+                    st.session_state.pop("stockout_pending", None)
+                    st.rerun()
+
         with st.form("stock_out_form"):
-            # Sélection du produit
-            selected_product = st.selectbox(
-                "Sélectionner le produit :",
-                options=product_options,
-                index=0 if product_options else None
-            )
 
             if selected_product:
                 current_stock = product_info[selected_product]["qty"]
@@ -381,7 +411,6 @@ with tab_stock_out:
 
                 # État du stock après la sortie
                 new_stock = current_stock - qty_to_remove
-                st.info(f"Stock restant après sortie : {new_stock}")
 
                 submitted = st.form_submit_button(
                     "Enregistrer la sortie",
@@ -391,39 +420,20 @@ with tab_stock_out:
                 )
 
                 if submitted:
-                    refresh()  # Recharge la page après la soumission du formulaire
-                    # Créer le message de confirmation
-                    confirm_msg = f"""
-                    **Confirmez la sortie de stock**
-                    
-                    - Produit : {product_info[selected_product]['name']}
-                    - Quantité à retirer : {qty_to_remove}
-                    - Motif : {reason}
-                    - Stock actuel : {current_stock}
-                    - Stock après sortie : {new_stock}
-                    """
+                    # Store pending confirmation in session_state and rerun to show confirmation panel
+                    detail_msg = reason
                     if details:
-                        confirm_msg += f"\n- Commentaire : {details}"
-
-                    if st.warning(confirm_msg):
-                        try:
-                            detail_msg = f"{reason}"
-                            if details:
-                                detail_msg += f" - {details}"
-                            
-                            db.remove_stock(
-                                product_id=product_info[selected_product]["id"],
-                                quantity=qty_to_remove,
-                                reason=detail_msg
-                            )
-                            st.session_state.show_stockout_success = "Sortie de stock enregistrée avec succès"
-                            refresh()  # Recharge la page après l'enregistrement réussi
-                        except ValueError as e:
-                            st.error(str(e))
-                            refresh()  # Recharge la page même en cas d'erreur
-                        except Exception as e:
-                            st.error(f"Erreur lors de l'enregistrement : {str(e)}")
-                            refresh()  # Recharge la page même en cas d'erreur
+                        detail_msg += f" - {details}"
+                    st.session_state["stockout_pending"] = {
+                        "id": product_info[selected_product]["id"],
+                        "name": product_info[selected_product]["name"],
+                        "qty": int(qty_to_remove),
+                        "reason": detail_msg,
+                        "details": details,
+                        "current_stock": current_stock,
+                        "new_stock": new_stock,
+                    }
+                    st.rerun()
 
 # --------------- History Tab ---------------
 with tab_history:
