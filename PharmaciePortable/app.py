@@ -21,6 +21,12 @@ st.set_page_config(page_title="Pharmacie - Gestion de Stock", page_icon="💊", 
 
 def refresh():
     st.rerun()
+# Si la sélection du produit change via un callback, on pose un flag et on effectue
+# un seul rerun au début du script pour appliquer les changements (évite d'appeler
+# st.rerun() depuis l'intérieur d'un callback, ce qui est un no-op).
+if st.session_state.get("product_selection_changed"):
+    st.session_state.pop("product_selection_changed", None)
+    st.rerun()
 # --------------- Dialogs ---------------
 @st.dialog("Modifier le produit")
 def edit_product_dialog(prod_id: int, name: str, quantity: int, expiry: str):
@@ -95,7 +101,8 @@ def edit_product_dialog(prod_id: int, name: str, quantity: int, expiry: str):
 
 @st.dialog("Supprimer le produit")
 def delete_product_dialog(prod_id: int, name: str):
-    st.warning(f"Êtes-vous sûr de vouloir supprimer ‘{name}’ ? Cette action est irréversible.")
+    refresh()  # Recharge la page dès l'ouverture de la modale
+    st.warning(f"Êtes-vous sûr de vouloir supprimer '{name}' ? Cette action est irréversible.")
     b1, b2 = st.columns(2)
     with b1:
         if st.button("Oui, supprimer", type="primary", use_container_width=True, key=f"dlg_del_yes_{prod_id}"):
@@ -103,11 +110,54 @@ def delete_product_dialog(prod_id: int, name: str):
                 db.delete_product(prod_id)
             except Exception as e:
                 st.error(f"Erreur lors de la suppression: {e}")
+                refresh()  # Recharge même en cas d'erreur
             else:
                 st.session_state.show_delete_success = "Produit supprimé avec succès"
                 refresh()
     with b2:
         if st.button("Annuler", use_container_width=True, key=f"dlg_del_no_{prod_id}"):
+            refresh()
+
+
+@st.dialog("Confirmer la sortie")
+def confirm_stockout_dialog(pending: dict):    
+    # Message d'information
+    st.info("Veuillez vérifier les informations suivantes :")
+    
+    # Informations en colonnes
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown(f"**Produit :** {pending['name']}")
+    with col2:
+        st.markdown(f"**Motif :** {pending['reason']}")
+    
+    st.markdown(f"**Quantité :** {pending['qty']}")
+    
+    st.divider()
+    
+    # Boutons d'action
+    b1, b2 = st.columns(2)
+    with b1:
+        if st.button("✓ Confirmer la sortie", type="primary", use_container_width=True, key="dlg_confirm_stockout"):
+            try:
+                db.remove_stock(
+                    product_id=pending['id'],
+                    quantity=pending['qty'],
+                    reason=pending['reason']
+                )
+            except Exception as e:
+                st.error(f"Erreur lors de l'enregistrement : {e}")
+            else:
+                # Message personnalisé selon si le stock atteint zéro
+                if pending['new_stock'] == 0:
+                    st.session_state.show_stockout_success = "🔴 Sortie de stock enregistrée ! Le produit a été supprimé car le stock est épuisé."
+                else:
+                    st.session_state.show_stockout_success = "✅ Sortie de stock enregistrée avec succès !"
+                del st.session_state["stockout_pending"]
+                refresh()
+    with b2:
+        if st.button("✕ Annuler", use_container_width=True, key="dlg_cancel_stockout"):
+            del st.session_state["stockout_pending"]
             refresh()
 
 
@@ -119,7 +169,7 @@ st.title("💊 Application de gestion de stock de pharmacie")
 st.caption("Ajouter, modifier et supprimer des produits avec validations.")
 
 # --------------- Tabs ---------------
-tab_add, tab_manage, tab_history = st.tabs(["➕ Ajouter un produit", "📋 Gérer les produits", "📜 Historique"]) 
+tab_add, tab_manage, tab_stock_out, tab_history = st.tabs(["➕ Ajouter un produit", "📋 Gérer les produits", "📤 Sorties de Stock", "📜 Historique"]) 
 
 # --------------- Add Product Tab ---------------
 with tab_add:
@@ -314,6 +364,108 @@ with tab_manage:
         with btn_cols[2]:
             st.empty()
 
+# --------------- Stock Out Tab ---------------
+with tab_stock_out:
+    st.subheader("📤 Enregistrer une sortie de stock")
+    st.caption("Sélectionnez un produit et indiquez la quantité à retirer du stock.")
+    
+    # Afficher la notification de succès si elle existe
+    if "show_stockout_success" in st.session_state:
+        st.toast(st.session_state.show_stockout_success, icon="✅")
+        del st.session_state.show_stockout_success
+
+    # Récupérer la liste des produits
+    all_products = db.get_products()
+    if not all_products:
+        st.info("Aucun produit disponible en stock.")
+    else:
+        # Préparer les données pour le selectbox
+        product_options = []
+        product_info = {}
+        for p in all_products:
+            pid = int(p["id"])
+            name = str(p["name"])
+            qty = int(p["quantity"])
+            exp = str(p["expiry_date"])
+            display_text = f"{name} (Stock: {qty}) - Exp: {exp}"
+            product_options.append(display_text)
+            product_info[display_text] = {"id": pid, "name": name, "qty": qty, "exp": exp}
+
+        # Sélection du produit (en dehors du formulaire pour rendre le changement réactif)
+        selected_product = st.selectbox(
+            "Sélectionner le produit :",
+            options=product_options,
+            index=0 if product_options else None,
+            key="stockout_selected",
+            on_change=lambda: st.session_state.__setitem__("product_selection_changed", True),
+        )
+
+        # If a stockout is pending confirmation, show confirmation modal
+        if "stockout_pending" in st.session_state:
+            pending = st.session_state["stockout_pending"]
+            confirm_stockout_dialog(pending)
+
+        with st.form("stock_out_form"):
+
+            if selected_product:
+                current_stock = product_info[selected_product]["qty"]
+                
+                # Vérifier si le stock est disponible
+                if current_stock == 0:
+                    st.warning("⚠️ Ce produit n'a plus de stock disponible.")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    # Quantité à retirer
+                    qty_to_remove = st.number_input(
+                        "Quantité à retirer",
+                        min_value=1,
+                        max_value=max(1, current_stock),
+                        value=1 if current_stock > 0 else 1,
+                        step=1,
+                        disabled=current_stock == 0
+                    )
+                with col2:
+                    # Raison de la sortie
+                    reason = st.selectbox(
+                        "Motif de la sortie",
+                        options=["💰 Vente", "⚠️ Périmé", "🎁 Donné", "📝 Autre"],
+                        index=0
+                    )
+
+                # Commentaire additionnel
+                details = st.text_area(
+                    "Commentaire (optionnel)",
+                    placeholder="Ajoutez des détails supplémentaires ici...",
+                    max_chars=200
+                )
+
+                # État du stock après la sortie
+                new_stock = current_stock - qty_to_remove
+
+                submitted = st.form_submit_button(
+                    "Enregistrer la sortie",
+                    type="primary",
+                    use_container_width=True,
+                    disabled=current_stock == 0
+                )
+
+                if submitted:
+                    # Store pending confirmation in session_state and rerun to show confirmation panel
+                    detail_msg = reason
+                    if details:
+                        detail_msg += f" - {details}"
+                    st.session_state["stockout_pending"] = {
+                        "id": product_info[selected_product]["id"],
+                        "name": product_info[selected_product]["name"],
+                        "qty": int(qty_to_remove),
+                        "reason": detail_msg,
+                        "details": details,
+                        "current_stock": current_stock,
+                        "new_stock": new_stock,
+                    }
+                    st.rerun()
+
 # --------------- History Tab ---------------
 with tab_history:
     st.subheader("📜 Historique des opérations")
@@ -401,3 +553,6 @@ with tab_history:
             st.metric("✏️ Modifications", modifications)
         with stats_cols[3]:
             st.metric("🗑️ Suppressions", suppressions)
+
+# --------------- Backup automatique en arrière-plan ---------------
+# Le système de backup fonctionne automatiquement sans interface utilisateur
