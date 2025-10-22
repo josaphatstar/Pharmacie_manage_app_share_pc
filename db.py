@@ -323,43 +323,80 @@ def remove_stock(product_id: int, quantity: int, reason: str = "") -> None:
         
         new_qty = current_qty - quantity
         
-        # Update stock
-        conn.execute(
-            "UPDATE products SET quantity = ? WHERE id = ?",
-            (new_qty, product_id)
-        )
-        
-        # Remove the automatic MODIFICATION history entry
-        last_hist = conn.execute(
-            "SELECT id, operation FROM history WHERE product_id = ? ORDER BY id DESC LIMIT 1",
-            (product_id,)
-        ).fetchone()
-        
-        if last_hist and last_hist['operation'] == 'MODIFICATION':
-            conn.execute("DELETE FROM history WHERE id = ?", (int(last_hist['id']),))
-        
-        # Add SORTIE history entry
-        details = f"Sortie de stock: {product['name']} (-{quantity})"
-        if reason:
-            details += f" - Motif: {reason}"
-        details += f" - Exp: {product['expiry_date']}"
-        
-        conn.execute(
-            """INSERT INTO history (
-                operation, product_id, product_name, old_quantity, new_quantity,
-                old_expiry_date, new_expiry_date, details
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                'SORTIE',
-                product_id,
-                product['name'],
-                current_qty,
-                new_qty,
-                product['expiry_date'],
-                product['expiry_date'],
-                details
+        # Si le stock atteint zéro, supprimer le produit
+        if new_qty == 0:
+            # Supprimer le produit
+            conn.execute("DELETE FROM products WHERE id = ?", (product_id,))
+            
+            # Remove the automatic SUPPRESSION history entry that will be created by the trigger
+            last_hist = conn.execute(
+                "SELECT id, operation FROM history WHERE product_id = ? ORDER BY id DESC LIMIT 1",
+                (product_id,)
+            ).fetchone()
+            
+            if last_hist and last_hist['operation'] == 'SUPPRESSION':
+                conn.execute("DELETE FROM history WHERE id = ?", (int(last_hist['id']),))
+            
+            # Add custom SORTIE history entry with stock depletion notice
+            details = f"🔴 Sortie de stock finale: {product['name']} (-{quantity}) - STOCK ÉPUISÉ - Produit supprimé"
+            if reason:
+                details += f" - Motif: {reason}"
+            details += f" - Exp: {product['expiry_date']}"
+            
+            conn.execute(
+                """INSERT INTO history (
+                    operation, product_id, product_name, old_quantity, new_quantity,
+                    old_expiry_date, new_expiry_date, details
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    'SORTIE',
+                    product_id,
+                    product['name'],
+                    current_qty,
+                    0,
+                    product['expiry_date'],
+                    product['expiry_date'],
+                    details
+                )
             )
-        )
+        else:
+            # Update stock normally
+            conn.execute(
+                "UPDATE products SET quantity = ? WHERE id = ?",
+                (new_qty, product_id)
+            )
+            
+            # Remove the automatic MODIFICATION history entry
+            last_hist = conn.execute(
+                "SELECT id, operation FROM history WHERE product_id = ? ORDER BY id DESC LIMIT 1",
+                (product_id,)
+            ).fetchone()
+            
+            if last_hist and last_hist['operation'] == 'MODIFICATION':
+                conn.execute("DELETE FROM history WHERE id = ?", (int(last_hist['id']),))
+            
+            # Add SORTIE history entry
+            details = f"Sortie de stock: {product['name']} (-{quantity})"
+            if reason:
+                details += f" - Motif: {reason}"
+            details += f" - Exp: {product['expiry_date']}"
+            
+            conn.execute(
+                """INSERT INTO history (
+                    operation, product_id, product_name, old_quantity, new_quantity,
+                    old_expiry_date, new_expiry_date, details
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    'SORTIE',
+                    product_id,
+                    product['name'],
+                    current_qty,
+                    new_qty,
+                    product['expiry_date'],
+                    product['expiry_date'],
+                    details
+                )
+            )
 
 
 __all__ = [

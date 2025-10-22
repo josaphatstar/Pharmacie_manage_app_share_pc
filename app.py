@@ -148,7 +148,11 @@ def confirm_stockout_dialog(pending: dict):
             except Exception as e:
                 st.error(f"Erreur lors de l'enregistrement : {e}")
             else:
-                st.session_state.show_stockout_success = "Sortie de stock enregistrée avec succès !"
+                # Message personnalisé selon si le stock atteint zéro
+                if pending['new_stock'] == 0:
+                    st.session_state.show_stockout_success = "🔴 Sortie de stock enregistrée ! Le produit a été supprimé car le stock est épuisé."
+                else:
+                    st.session_state.show_stockout_success = "✅ Sortie de stock enregistrée avec succès !"
                 del st.session_state["stockout_pending"]
                 refresh()
     with b2:
@@ -406,15 +410,20 @@ with tab_stock_out:
             if selected_product:
                 current_stock = product_info[selected_product]["qty"]
                 
+                # Vérifier si le stock est disponible
+                if current_stock == 0:
+                    st.warning("⚠️ Ce produit n'a plus de stock disponible.")
+                
                 col1, col2 = st.columns(2)
                 with col1:
                     # Quantité à retirer
                     qty_to_remove = st.number_input(
                         "Quantité à retirer",
                         min_value=1,
-                        max_value=current_stock,
-                        value=min(1, current_stock),
-                        step=1
+                        max_value=max(1, current_stock),
+                        value=1 if current_stock > 0 else 1,
+                        step=1,
+                        disabled=current_stock == 0
                     )
                 with col2:
                     # Raison de la sortie
@@ -514,7 +523,7 @@ with tab_history:
             elif operation == "SUPPRESSION":
                 icon = "🗑️"
             else:
-                icon = "❓"
+                icon = "📤"
             
             history_data.append({
                 "Date/Heure": formatted_time,

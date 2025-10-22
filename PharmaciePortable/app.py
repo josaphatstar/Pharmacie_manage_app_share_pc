@@ -371,7 +371,7 @@ with tab_history:
             elif operation == "SUPPRESSION":
                 icon = "🗑️"
             else:
-                icon = "❓"
+                icon = "📤"
             
             history_data.append({
                 "Date/Heure": formatted_time,
