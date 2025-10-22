@@ -291,6 +291,77 @@ def get_history_by_operation(operation: str, limit: Optional[int] = 50) -> List[
     return rows
 
 
+def remove_stock(product_id: int, quantity: int, reason: str = "") -> None:
+    """Remove a quantity from a product's stock and record it as a SORTIE operation.
+    
+    Args:
+        product_id: The ID of the product to update
+        quantity: The quantity to remove (positive number)
+        reason: Optional reason for the stock removal
+    
+    Raises:
+        ValueError: If quantity is negative or zero
+        ValueError: If product doesn't exist
+        ValueError: If not enough stock available
+    """
+    if quantity <= 0:
+        raise ValueError("La quantité à retirer doit être positive")
+
+    with closing(get_connection()) as conn, conn:
+        # Get current product info
+        product = conn.execute(
+            "SELECT name, quantity, expiry_date FROM products WHERE id = ?",
+            (product_id,)
+        ).fetchone()
+        
+        if not product:
+            raise ValueError("Produit non trouvé")
+        
+        current_qty = int(product['quantity'])
+        if current_qty < quantity:
+            raise ValueError(f"Stock insuffisant (disponible: {current_qty}, demandé: {quantity})")
+        
+        new_qty = current_qty - quantity
+        
+        # Update stock
+        conn.execute(
+            "UPDATE products SET quantity = ? WHERE id = ?",
+            (new_qty, product_id)
+        )
+        
+        # Remove the automatic MODIFICATION history entry
+        last_hist = conn.execute(
+            "SELECT id, operation FROM history WHERE product_id = ? ORDER BY id DESC LIMIT 1",
+            (product_id,)
+        ).fetchone()
+        
+        if last_hist and last_hist['operation'] == 'MODIFICATION':
+            conn.execute("DELETE FROM history WHERE id = ?", (int(last_hist['id']),))
+        
+        # Add SORTIE history entry
+        details = f"Sortie de stock: {product['name']} (-{quantity})"
+        if reason:
+            details += f" - Motif: {reason}"
+        details += f" - Exp: {product['expiry_date']}"
+        
+        conn.execute(
+            """INSERT INTO history (
+                operation, product_id, product_name, old_quantity, new_quantity,
+                old_expiry_date, new_expiry_date, details
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                'SORTIE',
+                product_id,
+                product['name'],
+                current_qty,
+                new_qty,
+                product['expiry_date'],
+                product['expiry_date'],
+                details
+            )
+        )
+
+
 __all__ = [
     "DB_PATH",
     "init_db",
@@ -299,6 +370,7 @@ __all__ = [
     "get_product_by_id",
     "update_product",
     "delete_product",
+    "remove_stock",
     "get_history",
     "get_history_by_operation",
 ]

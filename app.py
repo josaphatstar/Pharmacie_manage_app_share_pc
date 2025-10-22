@@ -95,7 +95,8 @@ def edit_product_dialog(prod_id: int, name: str, quantity: int, expiry: str):
 
 @st.dialog("Supprimer le produit")
 def delete_product_dialog(prod_id: int, name: str):
-    st.warning(f"Êtes-vous sûr de vouloir supprimer ‘{name}’ ? Cette action est irréversible.")
+    refresh()  # Recharge la page dès l'ouverture de la modale
+    st.warning(f"Êtes-vous sûr de vouloir supprimer '{name}' ? Cette action est irréversible.")
     b1, b2 = st.columns(2)
     with b1:
         if st.button("Oui, supprimer", type="primary", use_container_width=True, key=f"dlg_del_yes_{prod_id}"):
@@ -103,6 +104,7 @@ def delete_product_dialog(prod_id: int, name: str):
                 db.delete_product(prod_id)
             except Exception as e:
                 st.error(f"Erreur lors de la suppression: {e}")
+                refresh()  # Recharge même en cas d'erreur
             else:
                 st.session_state.show_delete_success = "Produit supprimé avec succès"
                 refresh()
@@ -119,7 +121,7 @@ st.title("💊 Application de gestion de stock de pharmacie")
 st.caption("Ajouter, modifier et supprimer des produits avec validations.")
 
 # --------------- Tabs ---------------
-tab_add, tab_manage, tab_history = st.tabs(["➕ Ajouter un produit", "📋 Gérer les produits", "📜 Historique"]) 
+tab_add, tab_manage, tab_stock_out, tab_history = st.tabs(["➕ Ajouter un produit", "📋 Gérer les produits", "📤 Sorties de Stock", "📜 Historique"]) 
 
 # --------------- Add Product Tab ---------------
 with tab_add:
@@ -313,6 +315,115 @@ with tab_manage:
                     delete_product_dialog(selected_id, name_map[selected_id])
         with btn_cols[2]:
             st.empty()
+
+# --------------- Stock Out Tab ---------------
+with tab_stock_out:
+    st.subheader("📤 Enregistrer une sortie de stock")
+    st.caption("Sélectionnez un produit et indiquez la quantité à retirer du stock.")
+    
+    # Afficher la notification de succès si elle existe
+    if "show_stockout_success" in st.session_state:
+        st.toast(st.session_state.show_stockout_success, icon="✅")
+        del st.session_state.show_stockout_success
+
+    # Récupérer la liste des produits
+    all_products = db.get_products()
+    if not all_products:
+        st.info("Aucun produit disponible en stock.")
+    else:
+        # Préparer les données pour le selectbox
+        product_options = []
+        product_info = {}
+        for p in all_products:
+            pid = int(p["id"])
+            name = str(p["name"])
+            qty = int(p["quantity"])
+            exp = str(p["expiry_date"])
+            display_text = f"{name} (Stock: {qty}) - Exp: {exp}"
+            product_options.append(display_text)
+            product_info[display_text] = {"id": pid, "name": name, "qty": qty, "exp": exp}
+
+        with st.form("stock_out_form"):
+            # Sélection du produit
+            selected_product = st.selectbox(
+                "Sélectionner le produit :",
+                options=product_options,
+                index=0 if product_options else None
+            )
+
+            if selected_product:
+                current_stock = product_info[selected_product]["qty"]
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    # Quantité à retirer
+                    qty_to_remove = st.number_input(
+                        "Quantité à retirer",
+                        min_value=1,
+                        max_value=current_stock,
+                        value=min(1, current_stock),
+                        step=1
+                    )
+                with col2:
+                    # Raison de la sortie
+                    reason = st.selectbox(
+                        "Motif de la sortie",
+                        options=["💰 Vente", "⚠️ Périmé", "🎁 Donné", "📝 Autre"],
+                        index=0
+                    )
+
+                # Commentaire additionnel
+                details = st.text_area(
+                    "Commentaire (optionnel)",
+                    placeholder="Ajoutez des détails supplémentaires ici...",
+                    max_chars=200
+                )
+
+                # État du stock après la sortie
+                new_stock = current_stock - qty_to_remove
+                st.info(f"Stock restant après sortie : {new_stock}")
+
+                submitted = st.form_submit_button(
+                    "Enregistrer la sortie",
+                    type="primary",
+                    use_container_width=True,
+                    disabled=current_stock == 0
+                )
+
+                if submitted:
+                    refresh()  # Recharge la page après la soumission du formulaire
+                    # Créer le message de confirmation
+                    confirm_msg = f"""
+                    **Confirmez la sortie de stock**
+                    
+                    - Produit : {product_info[selected_product]['name']}
+                    - Quantité à retirer : {qty_to_remove}
+                    - Motif : {reason}
+                    - Stock actuel : {current_stock}
+                    - Stock après sortie : {new_stock}
+                    """
+                    if details:
+                        confirm_msg += f"\n- Commentaire : {details}"
+
+                    if st.warning(confirm_msg):
+                        try:
+                            detail_msg = f"{reason}"
+                            if details:
+                                detail_msg += f" - {details}"
+                            
+                            db.remove_stock(
+                                product_id=product_info[selected_product]["id"],
+                                quantity=qty_to_remove,
+                                reason=detail_msg
+                            )
+                            st.session_state.show_stockout_success = "Sortie de stock enregistrée avec succès"
+                            refresh()  # Recharge la page après l'enregistrement réussi
+                        except ValueError as e:
+                            st.error(str(e))
+                            refresh()  # Recharge la page même en cas d'erreur
+                        except Exception as e:
+                            st.error(f"Erreur lors de l'enregistrement : {str(e)}")
+                            refresh()  # Recharge la page même en cas d'erreur
 
 # --------------- History Tab ---------------
 with tab_history:
