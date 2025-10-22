@@ -25,7 +25,7 @@ def init_db() -> None:
             """
             CREATE TABLE IF NOT EXISTS products (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL UNIQUE,
+                name TEXT NOT NULL,
                 quantity INTEGER NOT NULL CHECK(quantity >= 0),
                 expiry_date TEXT NOT NULL,
                 created_at TEXT DEFAULT (datetime('now'))
