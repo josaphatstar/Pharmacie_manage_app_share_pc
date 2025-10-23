@@ -21,12 +21,7 @@ st.set_page_config(page_title="Pharmacie - Gestion de Stock", page_icon="💊", 
 
 def refresh():
     st.rerun()
-# Si la sélection du produit change via un callback, on pose un flag et on effectue
-# un seul rerun au début du script pour appliquer les changements (évite d'appeler
-# st.rerun() depuis l'intérieur d'un callback, ce qui est un no-op).
-if st.session_state.get("product_selection_changed"):
-    st.session_state.pop("product_selection_changed", None)
-    st.rerun()
+
 # --------------- Dialogs ---------------
 @st.dialog("Modifier le produit")
 def edit_product_dialog(prod_id: int, name: str, quantity: int, expiry: str):
@@ -387,7 +382,7 @@ with tab_manage:
                 display_label = name
             else:
                 # Format avec espaces non-sécables pour les produits en doublon
-                display_label = f"{name}\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0→\u00A0\u00A0Exp: {exp}"
+                display_label = f"{name}\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0→\u00A0\u00A0Exp: {exp}"
             
             options.append(display_label)
             
@@ -436,15 +431,33 @@ with tab_stock_out:
     if not all_products:
         st.info("Aucun produit disponible en stock.")
     else:
-        # Préparer les données pour le selectbox
+        # Préparer les données pour le selectbox avec le même format que la section de gestion
         product_options = []
         product_info = {}
+        
+        # Compter les occurrences de chaque nom de produit
+        name_counts = {}
+        for p in all_products:
+            name = str(p["name"])
+            name_counts[name] = name_counts.get(name, 0) + 1
+        
+        # Créer les options d'affichage
         for p in all_products:
             pid = int(p["id"])
             name = str(p["name"])
             qty = int(p["quantity"])
             exp = str(p["expiry_date"])
-            display_text = f"{name} (Stock: {qty}) - Exp: {exp}"
+            
+            # Afficher nom + quantité pour tous les produits
+            # Si le nom est unique, afficher seulement nom + quantité
+            # Sinon, afficher nom + quantité + date d'expiration pour différencier
+            if name_counts[name] == 1:
+                # Produit unique : nom + quantité
+                display_text = f"{name}\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0→\u00A0\u00A0Qté: {qty}"
+            else:
+                # Produit en doublon : nom + quantité + date d'expiration
+                display_text = f"{name}\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0→\u00A0\u00A0Qté: {qty}  |  Exp: {exp}"
+            
             product_options.append(display_text)
             product_info[display_text] = {"id": pid, "name": name, "qty": qty, "exp": exp}
 
@@ -453,8 +466,6 @@ with tab_stock_out:
             "Sélectionner le produit :",
             options=product_options,
             index=0 if product_options else None,
-            key="stockout_selected",
-            on_change=lambda: st.session_state.__setitem__("product_selection_changed", True),
         )
 
         # If a stockout is pending confirmation, show confirmation modal
@@ -473,14 +484,14 @@ with tab_stock_out:
                 
                 col1, col2 = st.columns(2)
                 with col1:
-                    # Quantité à retirer
+                    # Quantité à retirer (sans max_value pour permettre la validation)
                     qty_to_remove = st.number_input(
                         "Quantité à retirer",
                         min_value=1,
-                        max_value=max(1, current_stock),
                         value=1 if current_stock > 0 else 1,
                         step=1,
-                        disabled=current_stock == 0
+                        disabled=current_stock == 0,
+                        help=f"Stock disponible : {current_stock}"
                     )
                 with col2:
                     # Raison de la sortie
@@ -499,29 +510,42 @@ with tab_stock_out:
 
                 # État du stock après la sortie
                 new_stock = current_stock - qty_to_remove
+                
+                # Vérifier si la quantité saisie est valide
+                is_quantity_valid = qty_to_remove <= current_stock and qty_to_remove > 0
+                
+                # Afficher un message d'erreur si la quantité est invalide
+                if not is_quantity_valid and current_stock > 0:
+                    st.error(f"❌ La quantité saisie ({qty_to_remove}) dépasse le stock disponible ({current_stock}).")
 
                 submitted = st.form_submit_button(
                     "Enregistrer la sortie",
                     type="primary",
                     use_container_width=True,
-                    disabled=current_stock == 0
+                    disabled=(current_stock == 0 or not is_quantity_valid)
                 )
 
                 if submitted:
-                    # Store pending confirmation in session_state and rerun to show confirmation panel
-                    detail_msg = reason
-                    if details:
-                        detail_msg += f" - {details}"
-                    st.session_state["stockout_pending"] = {
-                        "id": product_info[selected_product]["id"],
-                        "name": product_info[selected_product]["name"],
-                        "qty": int(qty_to_remove),
-                        "reason": detail_msg,
-                        "details": details,
-                        "current_stock": current_stock,
-                        "new_stock": new_stock,
-                    }
-                    st.rerun()
+                    # Vérification finale avant l'enregistrement
+                    if qty_to_remove > current_stock:
+                        st.error(f"❌ Impossible d'enregistrer : la quantité ({qty_to_remove}) dépasse le stock disponible ({current_stock}).")
+                    elif qty_to_remove <= 0:
+                        st.error("❌ La quantité doit être supérieure à 0.")
+                    else:
+                        # Store pending confirmation in session_state and rerun to show confirmation panel
+                        detail_msg = reason
+                        if details:
+                            detail_msg += f" - {details}"
+                        st.session_state["stockout_pending"] = {
+                            "id": product_info[selected_product]["id"],
+                            "name": product_info[selected_product]["name"],
+                            "qty": int(qty_to_remove),
+                            "reason": detail_msg,
+                            "details": details,
+                            "current_stock": current_stock,
+                            "new_stock": new_stock,
+                        }
+                        st.rerun()
 
 # --------------- History Tab ---------------
 with tab_history:
