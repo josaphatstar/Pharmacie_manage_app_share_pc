@@ -342,25 +342,48 @@ with tab_manage:
             st.dataframe(df, use_container_width=True, hide_index=True)
 
         # Selection + action buttons
-        # Simple selectbox matching the design intent: select a product, then action buttons below
-        options = [row['Désignation'] for _, row in df.iterrows()]
-        code_map = {row['Désignation']: int(row['Code']) for _, row in df.iterrows()}
-        name_map = {int(row['Code']): row['Désignation'] for _, row in df.iterrows()}
-        qty_map = {int(row['Code']): int(row['Quantité']) for _, row in df.iterrows()}
-        exp_map = {int(row['Code']): str(row["Date d'Expiration"]) for _, row in df.iterrows()}
+        # Créer des options avec nom + date d'expiration pour différencier les produits
+        options = []
+        product_map = {}
+        
+        for _, row in df.iterrows():
+            product_id = int(row['Code'])
+            name = row['Désignation']
+            qty = int(row['Quantité'])
+            exp = str(row["Date d'Expiration"])
+            days_left = row["Jours avant Expiration"]
+            
+            # Format: "Nom du produit (Qté: X, Exp: YYYY-MM-DD)"
+            display_label = f"{name} (Qté: {qty}, Exp: {exp})"
+            options.append(display_label)
+            
+            # Stocker toutes les infos du produit
+            product_map[display_label] = {
+                'id': product_id,
+                'name': name,
+                'quantity': qty,
+                'expiry': exp,
+                'days_left': days_left
+            }
 
         selected_label = st.selectbox("Sélectionner un produit :", options, index=0 if options else None)
-        selected_id = code_map.get(selected_label)
+        selected_product = product_map.get(selected_label)
+        selected_id = selected_product['id'] if selected_product else None
 
         btn_cols = st.columns([1, 1, 2])
         with btn_cols[0]:
             if st.button("Modifier", use_container_width=True, disabled=selected_id is None):
-                if selected_id is not None:
-                    edit_product_dialog(selected_id, name_map[selected_id], qty_map[selected_id], exp_map[selected_id])
+                if selected_product is not None:
+                    edit_product_dialog(
+                        selected_product['id'], 
+                        selected_product['name'], 
+                        selected_product['quantity'], 
+                        selected_product['expiry']
+                    )
         with btn_cols[1]:
             if st.button("Supprimer", use_container_width=True, disabled=selected_id is None):
-                if selected_id is not None:
-                    delete_product_dialog(selected_id, name_map[selected_id])
+                if selected_product is not None:
+                    delete_product_dialog(selected_product['id'], selected_product['name'])
         with btn_cols[2]:
             st.empty()
 
