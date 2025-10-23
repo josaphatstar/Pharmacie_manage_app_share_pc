@@ -346,6 +346,13 @@ with tab_manage:
         options = []
         product_map = {}
         
+        # Compter les occurrences de chaque nom de produit
+        name_counts = {}
+        for _, row in df.iterrows():
+            name = row['Désignation']
+            name_counts[name] = name_counts.get(name, 0) + 1
+        
+        # Créer les options d'affichage
         for _, row in df.iterrows():
             product_id = int(row['Code'])
             name = row['Désignation']
@@ -353,8 +360,14 @@ with tab_manage:
             exp = str(row["Date d'Expiration"])
             days_left = row["Jours avant Expiration"]
             
-            # Format: "Nom du produit (Qté: X, Exp: YYYY-MM-DD)"
-            display_label = f"{name} (Qté: {qty}, Exp: {exp})"
+            # Si le nom est unique, afficher seulement le nom
+            # Sinon, afficher nom + date d'expiration pour différencier
+            if name_counts[name] == 1:
+                display_label = name
+            else:
+                # Format avec espaces non-sécables pour les produits en doublon
+                display_label = f"{name}\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0→\u00A0\u00A0Exp: {exp}"
+            
             options.append(display_label)
             
             # Stocker toutes les infos du produit
