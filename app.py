@@ -99,23 +99,44 @@ def edit_product_dialog(prod_id: int, name: str, quantity: int, expiry: str):
             refresh()
 
 
-@st.dialog("Supprimer le produit")
+@st.dialog("Confirmer la suppression")
 def delete_product_dialog(prod_id: int, name: str):
-    refresh()  # Recharge la page dès l'ouverture de la modale
-    st.warning(f"Êtes-vous sûr de vouloir supprimer '{name}' ? Cette action est irréversible.")
-    b1, b2 = st.columns(2)
-    with b1:
-        if st.button("Oui, supprimer", type="primary", use_container_width=True, key=f"dlg_del_yes_{prod_id}"):
-            try:
-                db.delete_product(prod_id)
-            except Exception as e:
-                st.error(f"Erreur lors de la suppression: {e}")
-                refresh()  # Recharge même en cas d'erreur
-            else:
-                st.session_state.show_delete_success = "Produit supprimé avec succès"
+    # Récupérer les informations complètes du produit
+    product = db.get_product_by_id(prod_id)
+    
+    if product:
+        qty = int(product['quantity'])
+        exp = str(product['expiry_date'])
+        
+        # Message d'avertissement
+        st.error("⚠️ Cette action est irréversible !")
+        
+        # Informations du produit à supprimer
+        st.info("Vous êtes sur le point de supprimer le produit suivant :")
+        
+        st.markdown(f"**Produit :** {name}")
+        st.markdown(f"**Quantité en stock :** {qty}")
+        st.markdown(f"**Date d'expiration :** {exp}")
+        
+        st.divider()
+        
+        # Boutons d'action
+        b1, b2 = st.columns(2)
+        with b1:
+            if st.button("✓ Oui, supprimer", type="primary", use_container_width=True, key=f"dlg_del_yes_{prod_id}"):
+                try:
+                    db.delete_product(prod_id)
+                except Exception as e:
+                    st.error(f"Erreur lors de la suppression: {e}")
+                else:
+                    st.session_state.show_delete_success = f"✅ Produit '{name}' supprimé avec succès"
+                    refresh()
+        with b2:
+            if st.button("✕ Annuler", use_container_width=True, key=f"dlg_del_no_{prod_id}"):
                 refresh()
-    with b2:
-        if st.button("Annuler", use_container_width=True, key=f"dlg_del_no_{prod_id}"):
+    else:
+        st.error("Produit introuvable")
+        if st.button("Fermer", use_container_width=True):
             refresh()
 
 
