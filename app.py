@@ -484,12 +484,10 @@ with tab_stock_out:
                 
                 col1, col2 = st.columns(2)
                 with col1:
-                    # Quantité à retirer (sans max_value pour permettre la validation)
-                    qty_to_remove = st.number_input(
+                    # Quantité à retirer (utiliser text_input pour permettre la validation d'entrées invalides)
+                    qty_to_remove_str = st.text_input(
                         "Quantité à retirer",
-                        min_value=1,
-                        value=1 if current_stock > 0 else 1,
-                        step=1,
+                        value="1" if current_stock > 0 else "",
                         disabled=current_stock == 0,
                         help=f"Stock disponible : {current_stock}"
                     )
@@ -508,29 +506,37 @@ with tab_stock_out:
                     max_chars=200
                 )
 
-                # État du stock après la sortie
-                new_stock = current_stock - qty_to_remove
-                
-                # Vérifier si la quantité saisie est valide
-                is_quantity_valid = qty_to_remove <= current_stock and qty_to_remove > 0
-                
-                # Afficher un message d'erreur si la quantité est invalide
-                if not is_quantity_valid and current_stock > 0:
-                    st.error(f"❌ La quantité saisie ({qty_to_remove}) dépasse le stock disponible ({current_stock}).")
+                # Validation de la quantité saisie
+                qty_validation = validate_quantity(qty_to_remove_str)
+                is_qty_valid, qty_to_remove, qty_error = qty_validation
+
+                # Vérifier si la quantité est valide par rapport au stock
+                is_stock_valid = is_qty_valid and qty_to_remove <= current_stock
+
+                # État du stock après la sortie (si valide)
+                new_stock = current_stock - qty_to_remove if is_stock_valid else current_stock
+
+                # Afficher les messages d'erreur
+                if current_stock > 0:
+                    if not is_qty_valid:
+                        st.error(qty_error)
+                    elif qty_to_remove > current_stock:
+                        st.error(f"❌ La quantité saisie ({qty_to_remove}) dépasse le stock disponible ({current_stock}).")
+                    elif qty_to_remove <= 0:
+                        st.error("❌ La quantité doit être supérieure à 0.")
 
                 submitted = st.form_submit_button(
                     "Enregistrer la sortie",
                     type="primary",
                     use_container_width=True,
-                    disabled=(current_stock == 0 or not is_quantity_valid)
+                    disabled=(current_stock == 0 or not is_stock_valid)
                 )
 
                 if submitted:
-                    # Vérification finale avant l'enregistrement
-                    if qty_to_remove > current_stock:
-                        st.error(f"❌ Impossible d'enregistrer : la quantité ({qty_to_remove}) dépasse le stock disponible ({current_stock}).")
-                    elif qty_to_remove <= 0:
-                        st.error("❌ La quantité doit être supérieure à 0.")
+                    # Vérification finale avant l'enregistrement (utilisant la validation déjà faite)
+                    if not is_stock_valid:
+                        # Les erreurs sont déjà affichées plus haut
+                        pass
                     else:
                         # Store pending confirmation in session_state and rerun to show confirmation panel
                         detail_msg = reason
@@ -557,7 +563,7 @@ with tab_history:
     with filter_cols[0]:
         operation_filters = st.multiselect(
             "Filtrer par opération(s) :",
-            ["AJOUT", "MODIFICATION", "SUPPRESSION"],
+            ["AJOUT", "MODIFICATION", "SUPPRESSION", "SORTIE"],
             placeholder="Choisir une option",
             help="Sélectionnez une ou plusieurs opérations à afficher. Laissez vide pour tout afficher."
         )
@@ -625,7 +631,8 @@ with tab_history:
         ajouts = len([h for h in history_rows if h["operation"] == "AJOUT"])  # type: ignore[index]
         modifications = len([h for h in history_rows if h["operation"] == "MODIFICATION"])  # type: ignore[index]
         suppressions = len([h for h in history_rows if h["operation"] == "SUPPRESSION"])  # type: ignore[index]
-        
+        sorties = len([h for h in history_rows if h["operation"] == "SORTIE"])  # type: ignore[index]
+
         with stats_cols[0]:
             st.metric("Total opérations", total_operations)
         with stats_cols[1]:
@@ -633,7 +640,7 @@ with tab_history:
         with stats_cols[2]:
             st.metric("✏️ Modifications", modifications)
         with stats_cols[3]:
-            st.metric("🗑️ Suppressions", suppressions)
+            st.metric("📤 Sorties", suppressions + sorties)
 
 # --------------- Backup automatique en arrière-plan ---------------
 # Le système de backup fonctionne automatiquement sans interface utilisateur
