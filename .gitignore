@@ -15,7 +15,6 @@ __pycache__/
 *.db
 *.sqlite
 *.sqlite3
-pharmacy.db
 
 # === FICHIERS DE CONFIGURATION IDE ===
 .vscode/
