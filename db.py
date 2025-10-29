@@ -13,8 +13,16 @@ from dotenv import load_dotenv
 # Charger les variables d'environnement depuis .env (avec override pour forcer le rechargement)
 load_dotenv(override=True)
 
-# Récupérer l'URL de connexion MySQL depuis les variables d'environnement
+# Récupérer l'URL de connexion MySQL depuis les variables d'environnement ou Streamlit secrets
 DATABASE_URL = os.getenv("DATABASE_URL")
+
+# Si pas trouvé dans .env, essayer st.secrets (pour Streamlit Cloud)
+if not DATABASE_URL:
+    try:
+        import streamlit as st
+        DATABASE_URL = st.secrets.get("DATABASE_URL")
+    except:
+        pass
 
 if not DATABASE_URL:
     raise ValueError(

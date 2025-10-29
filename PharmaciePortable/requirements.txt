@@ -1,0 +1,8 @@
+# Dépendances pour Streamlit Cloud
+streamlit==1.37.1
+
+# Base de données MySQL (Railway)
+sqlalchemy==1.4.53
+pymysql==1.1.2
+python-dotenv==1.0.0
+cryptography==46.0.3
