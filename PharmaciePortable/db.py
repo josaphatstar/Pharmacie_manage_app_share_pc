@@ -1,5 +1,5 @@
 """Database access layer for the pharmacy stock app.
-Uses MySQL (Railway) via SQLAlchemy and provides simple CRUD functions.
+Uses MySQL (Aiven) via SQLAlchemy and provides simple CRUD functions.
 """
 from __future__ import annotations
 
@@ -13,8 +13,22 @@ from dotenv import load_dotenv
 # Charger les variables d'environnement depuis .env (avec override pour forcer le rechargement)
 load_dotenv(override=True)
 
-# Récupérer l'URL de connexion MySQL depuis les variables d'environnement ou Streamlit secrets
-DATABASE_URL = os.getenv("DATABASE_URL")
+# Récupérer l'URL de connexion MySQL depuis database_config.txt, .env ou Streamlit secrets
+DATABASE_URL = None
+
+# Essayer de lire depuis database_config.txt (dans le répertoire parent pour la version portable)
+config_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'database_config.txt')
+if os.path.exists(config_file):
+    with open(config_file, 'r', encoding='utf-8') as f:
+        for line in f:
+            line = line.strip()
+            if line.startswith('DATABASE_URL=') and len(line) > 13:
+                DATABASE_URL = line[13:]  # Après "DATABASE_URL="
+                break
+
+# Si pas trouvé dans database_config.txt, essayer .env
+if not DATABASE_URL:
+    DATABASE_URL = os.getenv("DATABASE_URL")
 
 # Si pas trouvé dans .env, essayer st.secrets (pour Streamlit Cloud)
 if not DATABASE_URL:
@@ -29,12 +43,27 @@ if not DATABASE_URL:
         "DATABASE_URL non définie. Créez un fichier .env avec DATABASE_URL=mysql+pymysql://user:password@host:port/database?charset=utf8mb4"
     )
 
-# Créer l'engine SQLAlchemy
+# Créer l'engine SQLAlchemy avec support SSL pour Aiven
+connect_args = {}
+if 'ssl-ca=' in DATABASE_URL:
+    # Extraire le chemin du certificat SSL pour Aiven
+    import urllib.parse
+    parsed = urllib.parse.urlparse(DATABASE_URL)
+    query_params = urllib.parse.parse_qs(parsed.query)
+    ssl_ca = query_params.get('ssl-ca', [None])[0]
+    if ssl_ca:
+        connect_args['ssl'] = {'ca': ssl_ca}
+    # Nettoyer l'URL en supprimant les paramètres de requête SSL
+    clean_url = DATABASE_URL.split('?')[0]
+else:
+    clean_url = DATABASE_URL
+
 engine: Engine = create_engine(
-    DATABASE_URL,
+    clean_url,
     pool_pre_ping=True,  # Vérifier la connexion avant utilisation
     pool_recycle=3600,   # Recycler les connexions après 1h
-    echo=False           # Mettre à True pour debug SQL
+    echo=False,          # Mettre à True pour debug SQL
+    connect_args=connect_args
 )
 
 
