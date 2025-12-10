@@ -16,7 +16,7 @@ if not _db_initialized:
     db.init_db()
     _db_initialized = True
 
-st.set_page_config(page_title="Pharmacie - Gestion de Stock", page_icon="💊", layout="centered")
+st.set_page_config(page_title="Pharmacie - Gestion de Stock", page_icon="💊", layout="wide")
 
 
 def refresh():
