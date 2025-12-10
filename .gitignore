@@ -61,8 +61,10 @@ htmlcov/
 # === FICHIERS SENSIBLES ===
 *.key
 *.pem
+!ca.pem
 config.ini
 secrets.json
+database_config.txt
 
 # === FICHIERS DE SAUVEGARDE ===
 *.bak
