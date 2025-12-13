@@ -3,7 +3,6 @@ Uses SQLite via SQLAlchemy and provides simple CRUD functions.
 """
 from __future__ import annotations
 
-
 import os
 from contextlib import contextmanager
 from typing import List, Optional, Dict, Any
@@ -29,23 +28,20 @@ engine: Engine = create_engine(
     pool_recycle=3600,   # Recycler les connexions après 1h
     echo=False           # Mettre à True pour debug SQL
 )
+
 @contextmanager
 def get_connection():
     """Context manager pour obtenir une connexion à la base de données."""
-    conn = None
-    trans = None
+    conn = engine.connect()
+    trans = conn.begin()
     try:
-        conn = engine.connect()
-        trans = conn.begin()
         yield conn
         trans.commit()
-    except Exception as e:
-        if trans:
-            trans.rollback()
-        raise Exception(f"Erreur de connexion à la base de données: {str(e)}")
+    except:
+        trans.rollback()
+        raise
     finally:
-        if conn:
-            conn.close()
+        conn.close()
 
 
 def init_db() -> None:
@@ -148,7 +144,6 @@ def add_product(name: str, quantity: int, expiry_date: str) -> int:
             })
             return int(new_id)
 
-
 def get_products(search: Optional[str] = None) -> List[Dict[str, Any]]:
     """Récupère tous les produits, avec filtrage optionnel par nom."""
     try:
@@ -166,111 +161,163 @@ def get_products(search: Optional[str] = None) -> List[Dict[str, Any]]:
             # Exécution de la requête
             result = conn.execute(text(query), params)
             
-            # Vérification du résultat
-            if not result:
+            # Récupération des résultats
+            rows = result.fetchall()
+            if not rows:
                 return []
-                
-            # Récupération des colonnes
-            cursor = result.cursor
-            if not cursor:
-                raise Exception("Impossible d'obtenir le curseur de la requête")
-                
-            # Création des dictionnaires
-            columns = [col[0] for col in cursor.description]
-            return [dict(zip(columns, row)) for row in result.fetchall()]
+            
+            # Conversion en liste de dictionnaires
+            columns = [col[0] for col in result.cursor.description]
+            return [dict(zip(columns, row)) for row in rows]
             
     except Exception as e:
         print(f"Erreur dans get_products: {str(e)}")
         return []
-            
-        # Création des dictionnaires manuellement
-        columns = [col[0] for col in result.cursor.description]
-        return [dict(zip(columns, row)) for row in rows]
 
 def get_product_by_id(product_id: int) -> Optional[Dict[str, Any]]:
     """Récupère un produit par son ID."""
     try:
         with get_connection() as conn:
+            # Exécution de la requête
             result = conn.execute(
                 text("SELECT * FROM products WHERE id = :id"),
                 {"id": product_id}
             )
             
-            if not result:
-                return None
-                
-            cursor = result.cursor
-            if not cursor:
-                raise Exception("Impossible d'obtenir le curseur de la requête")
-                
+            # Récupération du résultat
             row = result.fetchone()
             if not row:
                 return None
-                
-            columns = [col[0] for col in cursor.description]
-            return dict(zip(columns, row))
+            
+            # Conversion en dictionnaire
+            columns = [col[0] for col in result.cursor.description]
+            product_dict = dict(zip(columns, row))
+            
+            # Conversion des types si nécessaire
+            if 'expiry_date' in product_dict and product_dict['expiry_date']:
+                product_dict['expiry_date'] = str(product_dict['expiry_date'])
+            
+            return product_dict
             
     except Exception as e:
         print(f"Erreur dans get_product_by_id: {str(e)}")
         return None
 
-
 def update_product(product_id: int, name: str, quantity: int, expiry_date: str) -> None:
     with get_connection() as conn:
-        # Get old values for history
-        old = conn.execute(text(
-            "SELECT name, quantity, expiry_date FROM products WHERE id = :id"
-        ), {"id": product_id}).fetchone()
+        # Récupération des anciennes valeurs
+        result = conn.execute(
+            text("SELECT name, quantity, expiry_date FROM products WHERE id = :id"),
+            {"id": product_id}
+        )
         
-        if old:
-            old_name, old_qty, old_exp = old[0], old[1], str(old[2])
-            
-            conn.execute(text(
-                "UPDATE products SET name = :name, quantity = :qty, expiry_date = :exp WHERE id = :id"
-            ), {"name": name.strip(), "qty": quantity, "exp": expiry_date, "id": product_id})
-            
-            # Record MODIFICATION in history
-            details_parts = []
-            if old_name != name.strip():
-                details_parts.append(f"Nom: {old_name} → {name.strip()}")
-            if old_qty != quantity:
-                details_parts.append(f"Qté: {old_qty} → {quantity}")
-            if old_exp != expiry_date:
-                details_parts.append(f"Exp: {old_exp} → {expiry_date}")
-            
-            details = f"Produit modifié: {name.strip()}" + (f" ({', '.join(details_parts)})" if details_parts else "")
-            
-            conn.execute(text(
-                "INSERT INTO history (operation, product_id, product_name, old_quantity, new_quantity, old_expiry_date, new_expiry_date, details) "
-                "VALUES (:op, :pid, :name, :old_qty, :new_qty, :old_exp, :new_exp, :details)"
-            ), {
-                "op": 'MODIFICATION', "pid": product_id, "name": name.strip(),
-                "old_qty": old_qty, "new_qty": quantity,
-                "old_exp": old_exp, "new_exp": expiry_date, "details": details
-            })
+        # Récupération du résultat
+        old_row = result.fetchone()
+        if not old_row:
+            raise ValueError(f"Produit avec l'ID {product_id} non trouvé")
+        
+        # Conversion en dictionnaire
+        columns = [col[0] for col in result.cursor.description]
+        old_data = dict(zip(columns, old_row))
+        
+        # Extraction des anciennes valeurs
+        old_name = old_data['name']
+        old_qty = int(old_data['quantity'])
+        old_exp = str(old_data['expiry_date'])
+        
+        # Mise à jour du produit
+        conn.execute(
+            text("""
+                UPDATE products 
+                SET name = :name, quantity = :qty, expiry_date = :exp 
+                WHERE id = :id
+            """),
+            {
+                "name": name.strip(),
+                "qty": quantity,
+                "exp": expiry_date,
+                "id": product_id
+            }
+        )
+        
+        # Enregistrement dans l'historique
+        changes = []
+        if old_name != name.strip():
+            changes.append(f"Nom: {old_name} → {name.strip()}")
+        if old_qty != quantity:
+            changes.append(f"Qté: {old_qty} → {quantity}")
+        if old_exp != expiry_date:
+            changes.append(f"Exp: {old_exp} → {expiry_date}")
+        
+        details = f"Produit modifié: {name.strip()}"
+        if changes:
+            details += f" ({', '.join(changes)})"
+        
+        conn.execute(
+            text("""
+                INSERT INTO history 
+                (operation, product_id, product_name, old_quantity, new_quantity, 
+                 old_expiry_date, new_expiry_date, details) 
+                VALUES 
+                (:op, :pid, :name, :old_qty, :new_qty, :old_exp, :new_exp, :details)
+            """),
+            {
+                "op": 'MODIFICATION',
+                "pid": product_id,
+                "name": name.strip(),
+                "old_qty": old_qty,
+                "new_qty": quantity,
+                "old_exp": old_exp,
+                "new_exp": expiry_date,
+                "details": details
+            }
+        )
 
 
 def delete_product(product_id: int) -> None:
     with get_connection() as conn:
-        # Get product info for history
-        product = conn.execute(text(
-            "SELECT name, quantity, expiry_date FROM products WHERE id = :id"
-        ), {"id": product_id}).fetchone()
+        # Récupération des informations du produit
+        result = conn.execute(
+            text("SELECT name, quantity, expiry_date FROM products WHERE id = :id"),
+            {"id": product_id}
+        )
         
-        if product:
-            name, qty, exp = product[0], product[1], str(product[2])
-            
-            conn.execute(text("DELETE FROM products WHERE id = :id"), {"id": product_id})
-            
-            # Record SUPPRESSION in history
-            details = f"Produit supprimé: {name} (Qté: {qty}, Exp: {exp})"
-            conn.execute(text(
-                "INSERT INTO history (operation, product_id, product_name, old_quantity, old_expiry_date, details) "
-                "VALUES (:op, :pid, :name, :qty, :exp, :details)"
-            ), {
-                "op": 'SUPPRESSION', "pid": product_id, "name": name,
-                "qty": qty, "exp": exp, "details": details
-            })
+        product = result.fetchone()
+        if not product:
+            raise ValueError(f"Produit avec l'ID {product_id} non trouvé")
+        
+        # Conversion en dictionnaire
+        columns = [col[0] for col in result.cursor.description]
+        product_data = dict(zip(columns, product))
+        
+        name = product_data['name']
+        qty = product_data['quantity']
+        exp = str(product_data['expiry_date'])
+        
+        # Suppression du produit
+        conn.execute(
+            text("DELETE FROM products WHERE id = :id"),
+            {"id": product_id}
+        )
+        
+        # Enregistrement dans l'historique
+        details = f"Produit supprimé: {name} (Qté: {qty}, Exp: {exp})"
+        conn.execute(
+            text("""
+                INSERT INTO history 
+                (operation, product_id, product_name, old_quantity, old_expiry_date, details) 
+                VALUES 
+                (:op, :pid, :name, :qty, :exp, :details)
+            """),
+            {
+                "op": 'SUPPRESSION',
+                "pid": product_id,
+                "name": name,
+                "qty": qty,
+                "exp": exp,
+                "details": details
+            }
+        )
 
 
 def get_history(limit: Optional[int] = 100) -> List[Any]:
@@ -387,21 +434,3 @@ __all__ = [
     "get_history",
     "get_history_by_operation",
 ]
-
-
-
-
-# Test de connexion
-def test_connection():
-    try:
-        with get_connection() as conn:
-            print("Connexion à la base de données réussie !")
-            # Test d'une requête simple
-            result = conn.execute(text("SELECT version()"))
-            print("Version de PostgreSQL:", result.scalar())
-    except Exception as e:
-        print(f"Échec de la connexion: {str(e)}")
-
-# Appel de test (à supprimer après vérification)
-if __name__ == "__main__":
-    test_connection()
