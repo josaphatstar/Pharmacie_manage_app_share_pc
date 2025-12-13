@@ -3,6 +3,7 @@ Uses SQLite via SQLAlchemy and provides simple CRUD functions.
 """
 from __future__ import annotations
 
+
 import os
 from contextlib import contextmanager
 from typing import List, Optional, Dict, Any
@@ -148,19 +149,27 @@ def add_product(name: str, quantity: int, expiry_date: str) -> int:
 def get_products(search: Optional[str] = None) -> List[Dict[str, Any]]:
     """Récupère tous les produits, avec filtrage optionnel par nom."""
     with get_connection() as conn:
-        # Exécution de la requête
-        if search:
-            result = conn.execute(
-                text("SELECT * FROM products WHERE name ILIKE :search ORDER BY id ASC"),
-                {"search": f"%{search.strip()}%"}
-            )
-        else:
-            result = conn.execute(
-                text("SELECT * FROM products ORDER BY id ASC")
-            )
+        # Création de la requête
+        query = "SELECT * FROM products"
+        params = {}
         
-        # Conversion en liste de dictionnaires
-        return [dict(row._mapping) for row in result]
+        if search:
+            query += " WHERE name ILIKE :search"
+            params["search"] = f"%{search.strip()}%"
+            
+        query += " ORDER BY id ASC"
+        
+        # Exécution de la requête
+        result = conn.execute(text(query), params)
+        
+        # Récupération des résultats sous forme de dictionnaires
+        rows = result.fetchall()
+        if not rows:
+            return []
+            
+        # Création des dictionnaires manuellement
+        columns = [col[0] for col in result.cursor.description]
+        return [dict(zip(columns, row)) for row in rows]
 
 def get_product_by_id(product_id: int) -> Optional[Dict[str, Any]]:
     """Récupère un produit par son ID."""
@@ -168,9 +177,14 @@ def get_product_by_id(product_id: int) -> Optional[Dict[str, Any]]:
         result = conn.execute(
             text("SELECT * FROM products WHERE id = :id"),
             {"id": product_id}
-        ).fetchone()
-        
-        return dict(result._mapping) if result else None
+        )
+        row = result.fetchone()
+        if not row:
+            return None
+            
+        # Création du dictionnaire manuellement
+        columns = [col[0] for col in result.cursor.description]
+        return dict(zip(columns, row))
 
 
 def update_product(product_id: int, name: str, quantity: int, expiry_date: str) -> None:
