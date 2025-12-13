@@ -1,5 +1,5 @@
 """Database access layer for the pharmacy stock app.
-Uses MySQL (Railway) via SQLAlchemy and provides simple CRUD functions.
+Uses SQLite via SQLAlchemy and provides simple CRUD functions.
 """
 from __future__ import annotations
 
@@ -10,62 +10,24 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 from dotenv import load_dotenv
 
-# Charger les variables d'environnement depuis .env (avec override pour forcer le rechargement)
+# Charger les variables d'environnement depuis .env (pour DATABASE_URL)
 load_dotenv(override=True)
 
-# Récupérer l'URL de connexion MySQL depuis database_config.txt, .env ou Streamlit secrets
-DATABASE_URL = None
+# Récupérer l'URL de connexion PostgreSQL depuis les variables d'environnement
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-# Essayer de lire depuis database_config.txt
-config_file = os.path.join(os.path.dirname(__file__), 'database_config.txt')
-if os.path.exists(config_file):
-    with open(config_file, 'r', encoding='utf-8') as f:
-        for line in f:
-            line = line.strip()
-            if line.startswith('DATABASE_URL=') and len(line) > 13:
-                DATABASE_URL = line[13:]  # Après "DATABASE_URL="
-                break
-
-# Si pas trouvé dans database_config.txt, essayer .env
-if not DATABASE_URL:
-    DATABASE_URL = os.getenv("DATABASE_URL")
-
-# Si pas trouvé dans .env, essayer st.secrets (pour Streamlit Cloud)
-if not DATABASE_URL:
-    try:
-        import streamlit as st
-        DATABASE_URL = st.secrets.get("DATABASE_URL")
-    except:
-        pass
-
-if not DATABASE_URL:
+if not DATABASE_URL or not DATABASE_URL.startswith("postgresql"):
     raise ValueError(
-        "DATABASE_URL non définie. Créez un fichier .env avec DATABASE_URL=mysql+pymysql://user:password@host:port/database?charset=utf8mb4"
+        "DATABASE_URL pour PostgreSQL non définie. Créez un fichier .env avec DATABASE_URL=postgresql+psycopg2://user:password@host:port/database"
     )
 
-# Créer l'engine SQLAlchemy avec support SSL pour Aiven
-connect_args = {}
-if 'ssl-ca=' in DATABASE_URL:
-    # Extraire le chemin du certificat SSL pour Aiven
-    import urllib.parse
-    parsed = urllib.parse.urlparse(DATABASE_URL)
-    query_params = urllib.parse.parse_qs(parsed.query)
-    ssl_ca = query_params.get('ssl-ca', [None])[0]
-    if ssl_ca:
-        connect_args['ssl'] = {'ca': ssl_ca}
-    # Nettoyer l'URL en supprimant les paramètres de requête SSL
-    clean_url = DATABASE_URL.split('?')[0]
-else:
-    clean_url = DATABASE_URL
-
+# Créer l'engine SQLAlchemy pour PostgreSQL
 engine: Engine = create_engine(
-    clean_url,
+    DATABASE_URL,
     pool_pre_ping=True,  # Vérifier la connexion avant utilisation
     pool_recycle=3600,   # Recycler les connexions après 1h
-    echo=False,          # Mettre à True pour debug SQL
-    connect_args=connect_args
+    echo=False           # Mettre à True pour debug SQL
 )
-
 
 @contextmanager
 def get_connection():
@@ -89,13 +51,13 @@ def init_db() -> None:
         conn.execute(text(
             """
             CREATE TABLE IF NOT EXISTS products (
-                id INT AUTO_INCREMENT PRIMARY KEY,
+                id SERIAL PRIMARY KEY,
                 name VARCHAR(255) NOT NULL,
                 quantity INT NOT NULL CHECK(quantity >= 0),
                 expiry_date DATE NOT NULL,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE KEY unique_product (name, expiry_date)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (name, expiry_date)
+            )
             """
         ))
 
@@ -103,7 +65,7 @@ def init_db() -> None:
         conn.execute(text(
             """
             CREATE TABLE IF NOT EXISTS history (
-                id INT AUTO_INCREMENT PRIMARY KEY,
+                id SERIAL PRIMARY KEY,
                 operation VARCHAR(50) NOT NULL,
                 product_id INT,
                 product_name VARCHAR(255),
@@ -111,22 +73,15 @@ def init_db() -> None:
                 new_quantity INT,
                 old_expiry_date DATE,
                 new_expiry_date DATE,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-                details TEXT,
-                INDEX idx_timestamp (timestamp DESC)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                details TEXT
+            )
             """
         ))
 
-        # Helpful index for ordering by expiry date
-        # MySQL ne supporte pas IF NOT EXISTS pour les index, on ignore l'erreur si l'index existe déjà
-        try:
-            conn.execute(text(
-                "CREATE INDEX idx_products_expiry ON products(expiry_date)"
-            ))
-        except Exception:
-            # L'index existe déjà, on continue
-            pass
+        # Créer les index s'ils n'existent pas (syntaxe PostgreSQL)
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_timestamp ON history(timestamp DESC)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_products_expiry ON products(expiry_date)"))
 
 
 def add_product(name: str, quantity: int, expiry_date: str) -> int:
@@ -158,7 +113,7 @@ def add_product(name: str, quantity: int, expiry_date: str) -> int:
             ), {"qty": new_qty, "id": existing_id})
 
             # Record AJOUT (fusion) in history
-            details = f"Produit ajouté (fusion): {nm} (Qté précédent: {existing_qty}, +{added_qty}) - Exp: {exp}"
+            details = f"Produit ajouté (fusion): {nm} (Qté précédente: {existing_qty}, +{added_qty}) - Exp: {exp}"
             conn.execute(text(
                 "INSERT INTO history (operation, product_id, product_name, old_quantity, new_quantity, old_expiry_date, new_expiry_date, details) "
                 "VALUES (:op, :pid, :name, :old_qty, :new_qty, :old_exp, :new_exp, :details)"
@@ -170,10 +125,13 @@ def add_product(name: str, quantity: int, expiry_date: str) -> int:
             return existing_id
         else:
             result = conn.execute(text(
-                "INSERT INTO products (name, quantity, expiry_date) VALUES (:name, :qty, :exp)"
+                "INSERT INTO products (name, quantity, expiry_date) VALUES (:name, :qty, :exp) RETURNING id"
             ), {"name": nm, "qty": int(quantity), "exp": exp})
             
-            new_id = result.lastrowid
+            # Récupérer l'ID retourné par PostgreSQL
+            new_id = result.scalar_one_or_none()
+            if new_id is None:
+                raise RuntimeError("Impossible de récupérer l'ID du produit nouvellement inséré.")
             
             # Record AJOUT in history
             details = f"Produit ajouté: {nm} (Qté: {quantity}, Exp: {exp})"

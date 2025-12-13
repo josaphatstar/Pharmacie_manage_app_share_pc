@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 # Charger les variables d'environnement depuis .env (avec override pour forcer le rechargement)
 load_dotenv(override=True)
 
+<<<<<<< HEAD
 # Récupérer l'URL de connexion MySQL depuis database_config.txt, .env ou Streamlit secrets
 DATABASE_URL = None
 
@@ -29,14 +30,10 @@ if os.path.exists(config_file):
 # Si pas trouvé dans database_config.txt, essayer .env
 if not DATABASE_URL:
     DATABASE_URL = os.getenv("DATABASE_URL")
-
-# Si pas trouvé dans .env, essayer st.secrets (pour Streamlit Cloud)
-if not DATABASE_URL:
-    try:
-        import streamlit as st
-        DATABASE_URL = st.secrets.get("DATABASE_URL")
-    except:
-        pass
+=======
+# Récupérer l'URL de connexion MySQL depuis les variables d'environnement
+DATABASE_URL = os.getenv("DATABASE_URL")
+>>>>>>> parent of eca618e (add requirements after mysql)
 
 if not DATABASE_URL:
     raise ValueError(

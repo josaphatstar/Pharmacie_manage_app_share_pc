@@ -223,8 +223,7 @@ REM Installer les dépendances
 echo Installation des dependances...
 echo Cela peut prendre quelques minutes...
 echo.
-
-pip install streamlit pandas requests
+pip install streamlit pandas requests psycopg2-binary python-dotenv
 
 if %errorlevel% equ 0 (
     echo.
