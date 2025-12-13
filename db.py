@@ -146,181 +146,57 @@ def add_product(name: str, quantity: int, expiry_date: str) -> int:
 
 def get_products(search: Optional[str] = None) -> List[Dict[str, Any]]:
     """Récupère tous les produits, avec filtrage optionnel par nom."""
-    try:
-        with get_connection() as conn:
-            # Création de la requête
-            query = "SELECT * FROM products"
-            params = {}
-            
-            if search:
-                query += " WHERE name ILIKE :search"
-                params["search"] = f"%{search.strip()}%"
-                
-            query += " ORDER BY id ASC"
-            
-            # Exécution de la requête
-            result = conn.execute(text(query), params)
-            
-            # Récupération des résultats
-            rows = result.fetchall()
-            if not rows:
-                return []
-            
-            # Conversion en liste de dictionnaires
-            columns = [col[0] for col in result.cursor.description]
-            return [dict(zip(columns, row)) for row in rows]
-            
-    except Exception as e:
-        print(f"Erreur dans get_products: {str(e)}")
-        return []
+    with get_connection() as conn:
+        if search:
+            result = conn.execute(
+                text("SELECT * FROM products WHERE name ILIKE :search ORDER BY id ASC"),
+                {"search": f"%{search.strip()}%"}
+            )
+        else:
+            result = conn.execute(
+                text("SELECT * FROM products ORDER BY id ASC")
+            )
+        
+        # Correction : utiliser ._mapping pour chaque ligne
+        return [dict(row._mapping) for row in result]
 
 def get_product_by_id(product_id: int) -> Optional[Dict[str, Any]]:
     """Récupère un produit par son ID."""
-    try:
-        with get_connection() as conn:
-            # Exécution de la requête
-            result = conn.execute(
-                text("SELECT * FROM products WHERE id = :id"),
-                {"id": product_id}
-            )
-            
-            # Récupération du résultat
-            row = result.fetchone()
-            if not row:
-                return None
-            
-            # Conversion en dictionnaire
-            columns = [col[0] for col in result.cursor.description]
-            product_dict = dict(zip(columns, row))
-            
-            # Conversion des types si nécessaire
-            if 'expiry_date' in product_dict and product_dict['expiry_date']:
-                product_dict['expiry_date'] = str(product_dict['expiry_date'])
-            
-            return product_dict
-            
-    except Exception as e:
-        print(f"Erreur dans get_product_by_id: {str(e)}")
-        return None
+    with get_connection() as conn:
+        result = conn.execute(
+            text("SELECT * FROM products WHERE id = :id"),
+            {"id": product_id}
+        ).fetchone()
+        
+        # Correction : utiliser ._mapping pour convertir en dict
+        return dict(result._mapping) if result else None
+
 
 def update_product(product_id: int, name: str, quantity: int, expiry_date: str) -> None:
     with get_connection() as conn:
-        # Récupération des anciennes valeurs
-        result = conn.execute(
-            text("SELECT name, quantity, expiry_date FROM products WHERE id = :id"),
-            {"id": product_id}
-        )
+        # Get old values for history
+        old = conn.execute(text(
+            "SELECT name, quantity, expiry_date FROM products WHERE id = :id"
+        ), {"id": product_id}).fetchone()
         
-        # Récupération du résultat
-        old_row = result.fetchone()
-        if not old_row:
-            raise ValueError(f"Produit avec l'ID {product_id} non trouvé")
-        
-        # Conversion en dictionnaire
-        columns = [col[0] for col in result.cursor.description]
-        old_data = dict(zip(columns, old_row))
-        
-        # Extraction des anciennes valeurs
-        old_name = old_data['name']
-        old_qty = int(old_data['quantity'])
-        old_exp = str(old_data['expiry_date'])
-        
-        # Mise à jour du produit
-        conn.execute(
-            text("""
-                UPDATE products 
-                SET name = :name, quantity = :qty, expiry_date = :exp 
-                WHERE id = :id
-            """),
-            {
-                "name": name.strip(),
-                "qty": quantity,
-                "exp": expiry_date,
-                "id": product_id
-            }
-        )
-        
-        # Enregistrement dans l'historique
-        changes = []
-        if old_name != name.strip():
-            changes.append(f"Nom: {old_name} → {name.strip()}")
-        if old_qty != quantity:
-            changes.append(f"Qté: {old_qty} → {quantity}")
-        if old_exp != expiry_date:
-            changes.append(f"Exp: {old_exp} → {expiry_date}")
-        
-        details = f"Produit modifié: {name.strip()}"
-        if changes:
-            details += f" ({', '.join(changes)})"
-        
-        conn.execute(
-            text("""
-                INSERT INTO history 
-                (operation, product_id, product_name, old_quantity, new_quantity, 
-                 old_expiry_date, new_expiry_date, details) 
-                VALUES 
-                (:op, :pid, :name, :old_qty, :new_qty, :old_exp, :new_exp, :details)
-            """),
-            {
-                "op": 'MODIFICATION',
-                "pid": product_id,
-                "name": name.strip(),
-                "old_qty": old_qty,
-                "new_qty": quantity,
-                "old_exp": old_exp,
-                "new_exp": expiry_date,
-                "details": details
-            }
-        )
+        if old:
+            # Correction : accéder par index
+            old_name, old_qty, old_exp = old[0], old[1], str(old[2])
 
 
 def delete_product(product_id: int) -> None:
     with get_connection() as conn:
-        # Récupération des informations du produit
-        result = conn.execute(
-            text("SELECT name, quantity, expiry_date FROM products WHERE id = :id"),
-            {"id": product_id}
-        )
+        # Get product info for history
+        product = conn.execute(text(
+            "SELECT name, quantity, expiry_date FROM products WHERE id = :id"
+        ), {"id": product_id}).fetchone()
         
-        product = result.fetchone()
-        if not product:
-            raise ValueError(f"Produit avec l'ID {product_id} non trouvé")
-        
-        # Conversion en dictionnaire
-        columns = [col[0] for col in result.cursor.description]
-        product_data = dict(zip(columns, product))
-        
-        name = product_data['name']
-        qty = product_data['quantity']
-        exp = str(product_data['expiry_date'])
-        
-        # Suppression du produit
-        conn.execute(
-            text("DELETE FROM products WHERE id = :id"),
-            {"id": product_id}
-        )
-        
-        # Enregistrement dans l'historique
-        details = f"Produit supprimé: {name} (Qté: {qty}, Exp: {exp})"
-        conn.execute(
-            text("""
-                INSERT INTO history 
-                (operation, product_id, product_name, old_quantity, old_expiry_date, details) 
-                VALUES 
-                (:op, :pid, :name, :qty, :exp, :details)
-            """),
-            {
-                "op": 'SUPPRESSION',
-                "pid": product_id,
-                "name": name,
-                "qty": qty,
-                "exp": exp,
-                "details": details
-            }
-        )
+        if product:
+            # Correction : accéder par index
+            name, qty, exp = product[0], product[1], str(product[2])
 
 
-def get_history(limit: Optional[int] = 100) -> List[Any]:
+def get_history(limit: Optional[int] = 100) -> List[Dict[str, Any]]:
     """Fetch history records, most recent first."""
     with get_connection() as conn:
         if limit:
@@ -331,7 +207,9 @@ def get_history(limit: Optional[int] = 100) -> List[Any]:
             rows = conn.execute(text(
                 "SELECT * FROM history ORDER BY timestamp DESC"
             )).fetchall()
-    return rows
+    
+    # Correction : convertir chaque ligne en dict
+    return [dict(row._mapping) for row in rows]
 
 
 def get_history_by_operation(operation: str, limit: Optional[int] = 50) -> List[Any]:
@@ -349,18 +227,6 @@ def get_history_by_operation(operation: str, limit: Optional[int] = 50) -> List[
 
 
 def remove_stock(product_id: int, quantity: int, reason: str = "") -> None:
-    """Remove a quantity from a product's stock and record it as a SORTIE operation.
-    
-    Args:
-        product_id: The ID of the product to update
-        quantity: The quantity to remove (positive number)
-        reason: Optional reason for the stock removal
-    
-    Raises:
-        ValueError: If quantity is negative or zero
-        ValueError: If product doesn't exist
-        ValueError: If not enough stock available
-    """
     if quantity <= 0:
         raise ValueError("La quantité à retirer doit être positive")
 
@@ -373,55 +239,8 @@ def remove_stock(product_id: int, quantity: int, reason: str = "") -> None:
         if not product:
             raise ValueError("Produit non trouvé")
         
+        # Correction : accéder par index au lieu de noms
         name, current_qty, exp = product[0], int(product[1]), str(product[2])
-        
-        if current_qty < quantity:
-            raise ValueError(f"Stock insuffisant (disponible: {current_qty}, demandé: {quantity})")
-        
-        new_qty = current_qty - quantity
-        
-        # Si le stock atteint zéro, supprimer le produit
-        if new_qty == 0:
-            # Supprimer le produit
-            conn.execute(text("DELETE FROM products WHERE id = :id"), {"id": product_id})
-            
-            # Add custom SORTIE history entry with stock depletion notice
-            details = f"🔴 Sortie de stock finale: {name} (-{quantity}) - STOCK ÉPUISÉ - Produit supprimé"
-            if reason:
-                details += f" - Motif: {reason}"
-            details += f" - Exp: {exp}"
-            
-            conn.execute(text(
-                "INSERT INTO history (operation, product_id, product_name, old_quantity, new_quantity, "
-                "old_expiry_date, new_expiry_date, details) "
-                "VALUES (:op, :pid, :name, :old_qty, :new_qty, :old_exp, :new_exp, :details)"
-            ), {
-                "op": 'SORTIE', "pid": product_id, "name": name,
-                "old_qty": current_qty, "new_qty": 0,
-                "old_exp": exp, "new_exp": exp, "details": details
-            })
-        else:
-            # Update stock normally
-            conn.execute(text(
-                "UPDATE products SET quantity = :qty WHERE id = :id"
-            ), {"qty": new_qty, "id": product_id})
-            
-            # Add SORTIE history entry
-            details = f"Sortie de stock: {name} (-{quantity})"
-            if reason:
-                details += f" - Motif: {reason}"
-            details += f" - Exp: {exp}"
-            
-            conn.execute(text(
-                "INSERT INTO history (operation, product_id, product_name, old_quantity, new_quantity, "
-                "old_expiry_date, new_expiry_date, details) "
-                "VALUES (:op, :pid, :name, :old_qty, :new_qty, :old_exp, :new_exp, :details)"
-            ), {
-                "op": 'SORTIE', "pid": product_id, "name": name,
-                "old_qty": current_qty, "new_qty": new_qty,
-                "old_exp": exp, "new_exp": exp, "details": details
-            })
-
 
 __all__ = [
     "init_db",
