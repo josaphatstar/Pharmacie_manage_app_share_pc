@@ -29,20 +29,23 @@ engine: Engine = create_engine(
     pool_recycle=3600,   # Recycler les connexions après 1h
     echo=False           # Mettre à True pour debug SQL
 )
-
 @contextmanager
 def get_connection():
     """Context manager pour obtenir une connexion à la base de données."""
-    conn = engine.connect()
-    trans = conn.begin()
+    conn = None
+    trans = None
     try:
+        conn = engine.connect()
+        trans = conn.begin()
         yield conn
         trans.commit()
-    except:
-        trans.rollback()
-        raise
+    except Exception as e:
+        if trans:
+            trans.rollback()
+        raise Exception(f"Erreur de connexion à la base de données: {str(e)}")
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 
 def init_db() -> None:
@@ -148,24 +151,37 @@ def add_product(name: str, quantity: int, expiry_date: str) -> int:
 
 def get_products(search: Optional[str] = None) -> List[Dict[str, Any]]:
     """Récupère tous les produits, avec filtrage optionnel par nom."""
-    with get_connection() as conn:
-        # Création de la requête
-        query = "SELECT * FROM products"
-        params = {}
-        
-        if search:
-            query += " WHERE name ILIKE :search"
-            params["search"] = f"%{search.strip()}%"
+    try:
+        with get_connection() as conn:
+            # Création de la requête
+            query = "SELECT * FROM products"
+            params = {}
             
-        query += " ORDER BY id ASC"
-        
-        # Exécution de la requête
-        result = conn.execute(text(query), params)
-        
-        # Récupération des résultats sous forme de dictionnaires
-        rows = result.fetchall()
-        if not rows:
-            return []
+            if search:
+                query += " WHERE name ILIKE :search"
+                params["search"] = f"%{search.strip()}%"
+                
+            query += " ORDER BY id ASC"
+            
+            # Exécution de la requête
+            result = conn.execute(text(query), params)
+            
+            # Vérification du résultat
+            if not result:
+                return []
+                
+            # Récupération des colonnes
+            cursor = result.cursor
+            if not cursor:
+                raise Exception("Impossible d'obtenir le curseur de la requête")
+                
+            # Création des dictionnaires
+            columns = [col[0] for col in cursor.description]
+            return [dict(zip(columns, row)) for row in result.fetchall()]
+            
+    except Exception as e:
+        print(f"Erreur dans get_products: {str(e)}")
+        return []
             
         # Création des dictionnaires manuellement
         columns = [col[0] for col in result.cursor.description]
@@ -173,18 +189,30 @@ def get_products(search: Optional[str] = None) -> List[Dict[str, Any]]:
 
 def get_product_by_id(product_id: int) -> Optional[Dict[str, Any]]:
     """Récupère un produit par son ID."""
-    with get_connection() as conn:
-        result = conn.execute(
-            text("SELECT * FROM products WHERE id = :id"),
-            {"id": product_id}
-        )
-        row = result.fetchone()
-        if not row:
-            return None
+    try:
+        with get_connection() as conn:
+            result = conn.execute(
+                text("SELECT * FROM products WHERE id = :id"),
+                {"id": product_id}
+            )
             
-        # Création du dictionnaire manuellement
-        columns = [col[0] for col in result.cursor.description]
-        return dict(zip(columns, row))
+            if not result:
+                return None
+                
+            cursor = result.cursor
+            if not cursor:
+                raise Exception("Impossible d'obtenir le curseur de la requête")
+                
+            row = result.fetchone()
+            if not row:
+                return None
+                
+            columns = [col[0] for col in cursor.description]
+            return dict(zip(columns, row))
+            
+    except Exception as e:
+        print(f"Erreur dans get_product_by_id: {str(e)}")
+        return None
 
 
 def update_product(product_id: int, name: str, quantity: int, expiry_date: str) -> None:
@@ -359,3 +387,21 @@ __all__ = [
     "get_history",
     "get_history_by_operation",
 ]
+
+
+
+
+# Test de connexion
+def test_connection():
+    try:
+        with get_connection() as conn:
+            print("Connexion à la base de données réussie !")
+            # Test d'une requête simple
+            result = conn.execute(text("SELECT version()"))
+            print("Version de PostgreSQL:", result.scalar())
+    except Exception as e:
+        print(f"Échec de la connexion: {str(e)}")
+
+# Appel de test (à supprimer après vérification)
+if __name__ == "__main__":
+    test_connection()
