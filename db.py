@@ -145,27 +145,32 @@ def add_product(name: str, quantity: int, expiry_date: str) -> int:
             return int(new_id)
 
 
-def get_products(search: Optional[str] = None) -> List[Any]:
-    """Fetch all products optionally filtered by a search string on name."""
+def get_products(search: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Récupère tous les produits, avec filtrage optionnel par nom."""
     with get_connection() as conn:
+        # Exécution de la requête
         if search:
-            like = f"%{search.strip()}%"
-            rows = conn.execute(text(
-                "SELECT * FROM products WHERE name LIKE :search ORDER BY id ASC"
-            ), {"search": like}).fetchall()
+            result = conn.execute(
+                text("SELECT * FROM products WHERE name ILIKE :search ORDER BY id ASC"),
+                {"search": f"%{search.strip()}%"}
+            )
         else:
-            rows = conn.execute(text(
-                "SELECT * FROM products ORDER BY id ASC"
-            )).fetchall()
-    return rows
+            result = conn.execute(
+                text("SELECT * FROM products ORDER BY id ASC")
+            )
+        
+        # Conversion en liste de dictionnaires
+        return [dict(row._mapping) for row in result]
 
-
-def get_product_by_id(product_id: int) -> Optional[Any]:
+def get_product_by_id(product_id: int) -> Optional[Dict[str, Any]]:
+    """Récupère un produit par son ID."""
     with get_connection() as conn:
-        row = conn.execute(text(
-            "SELECT * FROM products WHERE id = :id"
-        ), {"id": product_id}).fetchone()
-    return row
+        result = conn.execute(
+            text("SELECT * FROM products WHERE id = :id"),
+            {"id": product_id}
+        ).fetchone()
+        
+        return dict(result._mapping) if result else None
 
 
 def update_product(product_id: int, name: str, quantity: int, expiry_date: str) -> None:
