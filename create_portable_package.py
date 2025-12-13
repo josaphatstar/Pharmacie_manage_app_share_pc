@@ -61,6 +61,7 @@ if %errorlevel% neq 0 (
 REM Installer les dépendances si nécessaire
 echo Verification des dependances...
 pip install streamlit pandas requests >nul 2>&1
+pip install streamlit pandas sqlalchemy psycopg2-binary python-dotenv >nul 2>&1
 
 REM Lancer l'application
 echo Demarrage de l'application...
@@ -93,6 +94,7 @@ try {
 # Installer les dépendances
 Write-Host "Installation des dependances..." -ForegroundColor Yellow
 pip install streamlit pandas requests
+pip install streamlit pandas sqlalchemy psycopg2-binary python-dotenv
 
 # Lancer l'application
 Write-Host "Lancement de l'application..." -ForegroundColor Green
@@ -144,6 +146,9 @@ Read-Host "Appuyez sur Entree pour quitter"
 - Vos données sont sauvegardées automatiquement
 - Base de données SQLite locale (`pharmacy.db`)
 - Pas d'installation de serveur externe requis
+- L'application se connecte à une base de données PostgreSQL en ligne.
+- Vous devez configurer la connexion en créant un fichier `.env` dans ce dossier.
+- Le fichier `.env` doit contenir : DATABASE_URL=votre_lien_de_connexion
 
 ## 🔧 Dépannage
 
@@ -155,6 +160,8 @@ Read-Host "Appuyez sur Entree pour quitter"
 ### "Module 'streamlit' non trouvé"
 - Le script d'installation installe automatiquement les dépendances
 - Si le problème persiste, exécutez manuellement :
+  ```shell
+  pip install streamlit pandas sqlalchemy psycopg2-binary python-dotenv
   ```
   pip install streamlit pandas requests
   ```
